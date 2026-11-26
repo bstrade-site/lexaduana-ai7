@@ -81,3 +81,17 @@ label:not(.search){font-size:13px;font-weight:720;color:#49372b}label:not(.searc
 @media(max-width:760px){.shell{display:block}.sidebar{position:relative;height:auto;padding:14px 16px;gap:12px}.sidebar .rail-rule,.sidebar .nav-heading,.rail-bottom{display:none}.sidebar nav{display:flex;overflow:auto;gap:4px}.nav-item{padding:7px 8px;white-space:nowrap;width:auto;font-size:12px}.nav-item .nav-arrow{display:none}.topbar{min-height:51px;padding-inline:16px}.content{padding:21px 16px 15px}.page-head{align-items:flex-start;flex-direction:column;margin-bottom:17px}.hero{min-height:242px}.hero-copy{padding:21px}.hero p{max-width:30ch;font-size:12.5px}.hero-art{background-position:center,right 7% top 12%,center;background-size:auto,100% auto,auto}.metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:13px 0}.section-head{align-items:flex-start;flex-direction:column;gap:11px;padding:14px}.search{min-width:0;width:100%}.footer{flex-wrap:wrap}.facts{grid-template-columns:1fr}.editor-section{padding:14px}}
 @media(max-width:420px){.fields,.term-grid,.file-links{grid-template-columns:1fr}.crumb,.access-mark{font-size:11px}.nav-item svg{width:14px}.editor-tabs button{font-size:11px;padding-inline:6px}.editor-tabs button svg{width:14px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+
+.facts.ficha-facts{grid-template-columns:repeat(2,minmax(0,1fr))}
+.facts.term-facts{grid-template-columns:1fr}
+.roadmap{display:grid;gap:10px;list-style:none;margin:0;padding:0}
+.roadmap>li{min-width:0;padding:13px 15px;border:1px solid var(--line);border-inline-start:3px solid var(--copper);border-radius:8px;background:#fcfaf8;overflow-wrap:anywhere}
+.roadmap h3{margin:4px 0 6px}
+.roadmap p,.roadmap dd{font-size:13px;line-height:1.55}
+.roadmap .roadmap-kicker,.roadmap dt{color:var(--copper-deep);font-size:11px;font-weight:750}
+.roadmap dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:8px 14px;margin:10px 0 0}
+.roadmap dd{margin:2px 0 0}
+.roadmap-sources{display:flex;flex-wrap:wrap;gap:6px 12px}
+.roadmap-sources:not(:empty){margin-top:10px}
+.roadmap-sources a{display:inline-flex;align-items:center;gap:4px;color:var(--copper-deep);font-size:12px;text-decoration:underline}
+@media(max-width:420px){.facts.ficha-facts{grid-template-columns:1fr}}

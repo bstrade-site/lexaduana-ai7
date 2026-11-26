@@ -6,7 +6,7 @@ import { db } from '../../db/index.js';
 import { cases } from '../../db/schema.js';
 import { analyze } from './analysis.mjs';
 import { makeLetter } from './letter.mjs';
-import { clientName, deadlines, defaultRecord, recordUpdate } from './rules.mjs';
+import { deadlines, defaultRecord, populateCase, recordUpdate } from './rules.mjs';
 
 export const config: Config = { path: '/api/*' };
 
@@ -44,7 +44,8 @@ async function bounded(req: Request, limit: number) {
 }
 
 function detail(row: typeof cases.$inferSelect) {
-  return { id: row.id, client: row.client, version: row.version, files: row.files.map(({name}) => name), record: row.record, analysis: row.analysis, deadlines: deadlines({ ...defaultRecord, ...row.record }), updatedAt: row.updatedAt };
+  const record = { ...defaultRecord, ...row.record };
+  return { id: row.id, client: row.client, version: row.version, files: row.files.map(({name}) => name), record, analysis: row.analysis, deadlines: deadlines(record), updatedAt: row.updatedAt };
 }
 
 async function listCases(url: URL) {
@@ -57,7 +58,7 @@ async function listCases(url: URL) {
       filed: sql<string>`${cases.record}->>'filed'`, reviewed: sql<string>`${cases.record}->>'reviewed'`,
       analyzed: sql<boolean>`${cases.analysis} is not null`,
     }).from(cases).where(filter).orderBy(desc(cases.updatedAt), desc(cases.id)).offset(offset).limit(51),
-    db.select({ all: sql<number>`count(*)::int`, clients: sql<number>`count(distinct ${cases.clientKey})::int`,
+    db.select({ all: sql<number>`count(*)::int`, clients: sql<number>`count(distinct nullif(${cases.clientKey}, ''))::int`,
       filed: sql<number>`(count(*) filter (where ${cases.record}->>'filed' <> ''))::int`,
       review: sql<number>`(count(*) filter (where ${cases.analysis} is not null and ${cases.record}->>'reviewed' = 'false' and ${cases.record}->>'filed' = ''))::int`,
     }).from(cases),
@@ -68,9 +69,8 @@ async function listCases(url: URL) {
 async function createCase(req: Request) {
   const data = await bounded(req, pdfLimit + 32768);
   const form = await new Response(data, { headers: { 'Content-Type': req.headers.get('content-type') ?? '' } }).formData().catch(() => null);
-  const client = clientName.safeParse(form?.get('client'));
   const files = form?.getAll('pdf') ?? [];
-  if (!client.success || !files.length || files.length > 4 || files.some((file) => typeof file === 'string')) throw new ApiError(400, 'Indica el nombre del cliente y adjunta entre uno y cuatro archivos PDF.');
+  if (!files.length || files.length > 4 || files.some((file) => typeof file === 'string')) throw new ApiError(400, 'Adjunta entre uno y cuatro archivos PDF.');
   const uploads = files as File[];
   if (uploads.reduce((sum, file) => sum + file.size, 0) > pdfLimit) throw new ApiError(413, 'Los PDF no pueden superar 8 MB en total.');
   for (const upload of uploads) {
@@ -85,7 +85,7 @@ async function createCase(req: Request) {
       await store.set(key, await file.arrayBuffer());
       stored.push({ key, name: file.name.slice(0, 180).replace(/[\u0000-\u001f\u007f]/g, '') });
     }
-    const [created] = await db.insert(cases).values({ id, client: client.data, clientKey: clientKey(client.data), files: stored, record: defaultRecord, updatedBy: anonymousActor }).returning();
+    const [created] = await db.insert(cases).values({ id, client: '', clientKey: '', files: stored, record: defaultRecord, updatedBy: anonymousActor }).returning();
     return json(detail(created), 201);
   } catch (error) {
     await Promise.allSettled(stored.map(({key}) => store.delete(key)));
@@ -101,6 +101,14 @@ function analysisStream(row: typeof cases.$inferSelect) {
       const send = (event: unknown) => { if (active) controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`)); };
       send({ progress: 'Cargando los PDF del expediente…' });
       const heartbeat = setInterval(() => send({}), 8000);
+      let facts: Parameters<typeof populateCase>[2] | undefined;
+      async function persist(extracted: Parameters<typeof populateCase>[2], analysis: Awaited<ReturnType<typeof analyze>> | null, warning?: string) {
+        const { client, record } = populateCase(row.client, row.record, extracted, analysis);
+        const [updated] = await db.update(cases).set({ client, clientKey: clientKey(client), record, analysis, version: row.version + 1, updatedAt: new Date(), updatedBy: anonymousActor })
+          .where(and(eq(cases.id, row.id), eq(cases.version, row.version))).returning();
+        if (!updated) send({ error: 'El expediente cambió durante el análisis. Ábrelo de nuevo antes de reintentar.' });
+        else send({ result: { ...detail(updated), analysisWarning: warning } });
+      }
       try {
         const store = pdfStore();
         const files = await Promise.all(row.files.map(async ({key, name}) => {
@@ -108,11 +116,9 @@ function analysisStream(row: typeof cases.$inferSelect) {
           if (!bytes) throw new Error('DOCUMENTO_NO_DISPONIBLE');
           return { name, bytes };
         }));
-        const analysis = await analyze(files, (progress) => send({ progress }));
-        const [updated] = await db.update(cases).set({ analysis, version: row.version + 1, updatedAt: new Date(), updatedBy: anonymousActor })
-          .where(and(eq(cases.id, row.id), eq(cases.version, row.version))).returning();
-        if (!updated) send({ error: 'El expediente cambió durante el análisis. Ábrelo de nuevo antes de reintentar.' });
-        else send({ result: detail(updated) });
+        const analysis = await analyze(files, (progress) => send({ progress }), (extracted) => { facts = extracted; });
+        facts = undefined;
+        await persist(analysis.facts, analysis);
       } catch (error) {
         const messages: Record<string, string> = {
           ACTO_NO_IDENTIFICADO: 'No se identificó un acto aduanero legible. Verifica el PDF principal.',
@@ -120,7 +126,11 @@ function analysisStream(row: typeof cases.$inferSelect) {
           SIN_FUNDAMENTO_VERIFICABLE: 'No se obtuvieron citas verificables para este acto. No se generó un dictamen.',
           DOCUMENTO_NO_DISPONIBLE: 'No se encontró uno de los PDF archivados.',
         };
-        send({ error: error instanceof Error && Object.hasOwn(messages, error.message) ? messages[error.message] : 'No se completó el análisis. El expediente y sus PDF siguen guardados.' });
+        const message = error instanceof Error && Object.hasOwn(messages, error.message) ? messages[error.message] : 'No se completó el análisis. El expediente y sus PDF siguen guardados.';
+        if (facts && !row.analysis) {
+          try { await persist(facts, null, `Se guardaron los datos del PDF. ${message}`); }
+          catch { send({ error: message }); }
+        } else send({ error: message });
       } finally { clearInterval(heartbeat); if (active) controller.close(); }
     },
     cancel() { active = false; },
@@ -149,8 +159,10 @@ export default async function handler(req: Request) {
       try { data = JSON.parse(payload.toString('utf8')); } catch { throw new ApiError(400, 'JSON no válido.'); }
       const input = recordUpdate.safeParse(data);
       if (!input.success) throw new ApiError(400, input.error.issues[0]?.message ?? 'Revisa los datos del expediente.');
-      const { client, record, version } = input.data;
-      const [updated] = await db.update(cases).set({ client, clientKey: clientKey(client), record, version: version + 1, updatedAt: new Date(), updatedBy: anonymousActor })
+      const { record: manual, version } = input.data;
+      const record = { ...defaultRecord, ...row.record, ...manual };
+      if (record.reviewed && (!row.client || !record.act || !record.office)) throw new ApiError(400, 'El PDF debe identificar al cliente, el número del acto y la dependencia antes de aprobar el escrito.');
+      const [updated] = await db.update(cases).set({ record, version: version + 1, updatedAt: new Date(), updatedBy: anonymousActor })
         .where(and(eq(cases.id, id), eq(cases.version, version))).returning();
       if (!updated) throw new ApiError(409, 'Otra persona modificó el expediente. Vuelve a abrirlo para continuar.');
       return json(detail(updated));
