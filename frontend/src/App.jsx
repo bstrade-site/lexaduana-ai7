@@ -28,7 +28,7 @@ function Modal({title, close, children}) {
   </dialog>;
 }
 
-function Intake({ close, created, clients }) {
+function Intake({ close, created }) {
   const [files, setFiles] = useState([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -45,15 +45,14 @@ function Intake({ close, created, clients }) {
     finally { setBusy(false); }
   }
   return <Modal title="Nuevo expediente" close={() => { if (!busy) close(); }}>
-    <p className="muted">Registra el cliente y adjunta el acto principal. Puedes incluir hasta tres soportes.</p>
+    <p className="muted">Adjunta primero el acto principal y luego sus soportes. La ficha se completa a partir de los PDF.</p>
     <p className="notice">Los expedientes y sus PDF son públicos. No adjuntes documentos confidenciales.</p>
     <form className="stack" onSubmit={submit}>
-      <label>Nombre del cliente<input name="client" placeholder="Razón social o nombre completo" list="registered-clients" maxLength={180} minLength={2} required/></label>
-      <datalist id="registered-clients">{clients.map((client) => <option key={client} value={client}/>)}</datalist>
       <label className="upload"><UploadCloud size={23}/><strong>Seleccionar archivos PDF</strong><span>Hasta 4 PDF · 8 MB en total</span><input type="file" accept="application/pdf,.pdf" multiple onChange={(event) => setFiles([...event.target.files])}/></label>
       {!!files.length && <ol className="file-preview">{files.map((file, index) => <li key={`${file.name}-${index}`}><FileText size={16}/><span>{index === 0 ? 'Acto principal' : `Soporte ${index}`}: {file.name}</span><button type="button" className="icon-button" aria-label={`Quitar ${file.name}`} onClick={() => setFiles((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={15}/></button></li>)}</ol>}
+      <label className="check-line"><input type="checkbox" disabled={busy} required/> Confirmo que estoy autorizado a procesar estos PDF con el proveedor de IA.</label>
       {error && <p className="alert" role="alert">{error}</p>}
-      <button className="button primary" disabled={busy}>{busy ? 'Guardando PDF…' : 'Crear expediente'} <ArrowRight size={17}/></button>
+      <button className="button primary" disabled={busy}>{busy ? 'Guardando PDF…' : 'Crear y analizar expediente'} <ArrowRight size={17}/></button>
     </form>
   </Modal>;
 }
@@ -100,7 +99,7 @@ export default function App() {
     catch (failure) { setOpenError(failure.message); }
     finally { setOpening(''); }
   }
-  function updated(record) { setSelected(record); setReload((value) => value + 1); }
+  function updated(record) { setSelected((current) => current?.id === record.id ? record : current); setReload((value) => value + 1); }
 
   return <div className="shell">
     <aside className="sidebar">
@@ -134,7 +133,7 @@ export default function App() {
             <div className="section-head"><div><h2 id="registry-title">{page === 'Resumen' ? 'Expedientes recientes' : 'Registro de expedientes'}</h2><p>Actos administrativos, dictámenes y radicados por cliente.</p></div><label className="search"><Search size={17}/><input type="search" aria-label="Buscar por cliente o acto" placeholder="Buscar cliente o acto…" value={search} onChange={(event) => { setSearch(event.target.value); setOffset(0); }}/></label></div>
             {listError ? <div className="empty"><p role="alert">{listError}</p><button className="text-button" onClick={() => setReload((value) => value + 1)}>Reintentar</button></div> : !list?.items.length ? <div className="empty"><span><FolderClosed size={23}/></span><h3>{loading || !list ? 'Consultando expedientes…' : search ? 'No se encontraron expedientes' : 'Aún no hay expedientes'}</h3><p>{search ? 'Prueba con el nombre del cliente o el número de acto.' : 'Carga el primer acto de la DIAN para empezar.'}</p>{!loading && list && !search && <button className="text-button" onClick={create}>Crear expediente <ArrowRight size={16}/></button>}</div> : <>
               <div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Acto administrativo</th><th>Estado</th><th>Actualización</th><th><span className="sr-only">Abrir</span></th></tr></thead><tbody>
-                {list.items.map((item) => <tr key={item.id}><td><strong>{item.client}</strong></td><td>{item.type || 'Tipo por identificar'}<small>{item.act || 'Sin número registrado'}</small></td><td><Status item={item}/></td><td>{dateFormat.format(new Date(item.updatedAt))}</td><td><button className="icon-button" disabled={!!opening} onClick={() => openCase(item.id)} aria-label={`Abrir expediente de ${item.client}`}><ArrowUpRight size={17}/></button></td></tr>)}
+                {list.items.map((item) => <tr key={item.id}><td><strong>{item.client || 'Cliente por identificar'}</strong></td><td>{item.type || 'Tipo por identificar'}<small>{item.act || 'Sin número registrado'}</small></td><td><Status item={item}/></td><td>{dateFormat.format(new Date(item.updatedAt))}</td><td><button className="icon-button" disabled={!!opening} onClick={() => openCase(item.id)} aria-label={`Abrir expediente: ${item.client || item.act || 'cliente por identificar'}`}><ArrowUpRight size={17}/></button></td></tr>)}
               </tbody></table></div>
               {(offset > 0 || list.more) && <div className="pagination"><button className="button outline" disabled={!offset || loading} onClick={() => setOffset(offset - 50)}><ArrowLeft size={16}/> Anteriores</button><button className="button outline" disabled={!list.more || loading} onClick={() => setOffset(offset + 50)}>Siguientes <ArrowRight size={16}/></button></div>}
             </>}
@@ -143,8 +142,8 @@ export default function App() {
         </>}
       </div>
     </main>
-    {modal === 'new' && <Intake close={() => setModal('')} created={(entry) => { setModal(''); setPage('Expedientes'); updated(entry); }} clients={[...new Set(list?.items.map(({client}) => client))]}/>}
+    {modal === 'new' && <Intake close={() => setModal('')} created={(entry) => { setModal(''); setPage('Expedientes'); setSelected({ ...entry, analyzeOnOpen: true }); setReload((value) => value + 1); }}/>}
     {modal === 'sources' && <Modal title="Fuentes normativas" close={() => setModal('')}><p className="muted">El análisis consulta el Normograma DIAN. Contrasta las citas y la vigencia aplicable al caso antes de firmar.</p><div className="source-list">{references.map(([title, summary, url]) => <a key={url} href={url} target="_blank" rel="noreferrer"><BookOpen size={19}/><span><strong>{title}</strong><small>{summary}</small></span><ArrowUpRight size={17}/></a>)}</div></Modal>}
-    {modal === 'help' && <Modal title="Guía de uso" close={() => setModal('')}><ol className="guide"><li><UploadCloud size={18}/><span><strong>Registra el expediente.</strong> Identifica al cliente y carga primero el acto principal.</span></li><li><Scale size={18}/><span><strong>Revisa el dictamen.</strong> Comprueba hechos, fuentes y fechas de cómputo.</span></li><li><ArrowDownToLine size={18}/><span><strong>Exporta la respuesta.</strong> Aprueba y descarga el Word para firmar y enviar externamente.</span></li><li><FileCheck2 size={18}/><span><strong>Deja constancia.</strong> Registra la respuesta, el radicado y la resolución del caso.</span></li></ol></Modal>}
+    {modal === 'help' && <Modal title="Guía de uso" close={() => setModal('')}><ol className="guide"><li><UploadCloud size={18}/><span><strong>Carga el acto principal.</strong> La ficha se completa con los datos identificados en los PDF.</span></li><li><Scale size={18}/><span><strong>Revisa el dictamen y la hoja de ruta.</strong> Comprueba hechos, fuentes y fechas de cómputo.</span></li><li><ArrowDownToLine size={18}/><span><strong>Exporta la respuesta.</strong> Aprueba y descarga el Word para firmar y enviar externamente.</span></li><li><FileCheck2 size={18}/><span><strong>Deja constancia.</strong> Registra la respuesta, el radicado y la resolución del caso.</span></li></ol></Modal>}
   </div>;
 }
