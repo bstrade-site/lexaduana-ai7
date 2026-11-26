@@ -1,46 +1,10 @@
 import { useState } from 'react';
 import { ArrowDownToLine, ArrowLeft, ArrowUpRight, BookOpen, CalendarClock, Check, CircleAlert, FileCheck2, FileText, Files, Scale, Sparkles } from 'lucide-react';
 import { businessDeadline, validDate } from '../netlify/server/calendar.mjs';
+import { api, readAnalysis } from './api.js';
 
 const tabs = [[Files, 'Ficha del expediente'], [Scale, 'Dictamen'], [FileCheck2, 'Respuesta Word']];
 const letterFields = new Set(['act', 'office', 'subject', 'signer', 'capacity', 'contact', 'body', 'attachments']);
-
-export async function api(path, options = {}) {
-  const response = await fetch(path, { ...options, credentials: 'omit' });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    throw new Error(payload?.error || 'No fue posible completar la solicitud.');
-  }
-  return response.json();
-}
-
-async function readAnalysis(id, update) {
-  const response = await fetch(`/api/cases/${id}/analysis`, { method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmProcessing: true }) });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    throw new Error(payload?.error || 'No se pudo iniciar el análisis.');
-  }
-  if (!response.body || !response.headers.get('content-type')?.startsWith('application/x-ndjson')) throw new Error('El servicio de análisis no está disponible.');
-  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
-  let buffer = '';
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += value;
-      const events = buffer.split('\n');
-      buffer = events.pop();
-      for (const line of events) {
-        if (!line) continue;
-        const event = JSON.parse(line);
-        if (event.error) throw new Error(event.error);
-        if (event.progress) update(event.progress);
-        if (event.result) return event.result;
-      }
-    }
-  } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
-  throw new Error('Se interrumpió la conexión. Vuelve a abrir el expediente para comprobar el estado.');
-}
 
 function Label({title, hint, children}) {
   return <label>{title}{children}{hint && <small>{hint}</small>}</label>;

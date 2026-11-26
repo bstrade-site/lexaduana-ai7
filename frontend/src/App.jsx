@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, BookOpen, CalendarClock, ChevronRight, CircleHelp, FileCheck2, FileText, FolderClosed, Globe, LayoutDashboard, Plus, Scale, Search, UploadCloud, Users, X } from 'lucide-react';
-import { CaseEditor, api } from './CaseEditor.jsx';
+import { CaseEditor } from './CaseEditor.jsx';
+import { api } from './api.js';
 
 const official = 'https://normograma.dian.gov.co/dian/compilacion/docs/';
 const references = [

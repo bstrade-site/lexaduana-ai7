@@ -4,11 +4,11 @@ Espacio público de gestión aduanera. Los expedientes y sus revisiones se guard
 
 ## Acceso al espacio de trabajo
 
-El panel abre sin contraseña, cuenta ni inicio de sesión. Cualquier visitante puede consultar y editar expedientes existentes, crear otros, descargar los PDF y ejecutar análisis. Las modificaciones se registran como anónimas. No uses este espacio para documentos confidenciales ni datos personales que no deban hacerse públicos.
+La aplicación no tiene inicio de sesión propio. Si el despliegue está protegido por Netlify, primero se necesita acceso al sitio; el panel conserva esa sesión en las solicitudes a la API. En un despliegue público, cualquier visitante puede consultar y editar expedientes existentes, crear otros, descargar los PDF y ejecutar análisis. Las modificaciones se registran como anónimas. No uses un despliegue público para documentos confidenciales ni datos personales que no deban hacerse públicos.
 
 ## API
 
-Las rutas de expedientes no requieren cookies ni encabezados de autenticación. Las solicitudes de escritura con encabezado `Origin` deben venir del mismo origen que la API; los clientes HTTP sin ese encabezado pueden usarla directamente. Los errores HTTP se devuelven como JSON con un campo `error`.
+La aplicación no exige autenticación propia para las rutas de expedientes. La protección del despliegue configurada en Netlify, si existe, también se aplica a las rutas de la API. Las solicitudes de escritura con encabezado `Origin` deben venir del mismo origen que la API. Los errores HTTP de la aplicación se devuelven como JSON con un campo `error`.
 
 | Método y ruta | Uso |
 | --- | --- |
