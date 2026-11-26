@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { acceptInvite, getUser, handleAuthCallback, login, logout, onAuthChange, requestPasswordRecovery, updateUser } from '@netlify/identity';
+import { getSettings, getUser, handleAuthCallback, logout, oauthLogin, onAuthChange } from '@netlify/identity';
 import { ArrowDownToLine, ArrowLeft, ArrowRight, ArrowUpRight, BookOpen, CalendarClock, ChevronRight, ChevronDown, CircleHelp, FileCheck2, FileText, FolderClosed, LayoutDashboard, LockKeyhole, LogOut, Plus, Scale, Search, ShieldCheck, UploadCloud, Users, X } from 'lucide-react';
 import { CaseEditor, api } from './CaseEditor.jsx';
+import { workspaceEmail } from '../netlify/server/access.mjs';
 
 const official = 'https://normograma.dian.gov.co/dian/compilacion/docs/';
 const references = [
@@ -20,6 +21,21 @@ const metrics = [
 const dateFormat = new Intl.DateTimeFormat('es-CO', { dateStyle: 'medium', timeZone: 'America/Bogota' });
 let initialAuth;
 
+async function completeGoogleSignIn() {
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  if (params.has('error') || ['invite_token', 'confirmation_token', 'recovery_token', 'email_change_token'].some((key) => params.has(key))) {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    throw new Error('No se completó el acceso. Continúa con Google y selecciona tu cuenta autorizada.');
+  }
+  if (!params.has('access_token')) return false;
+  try {
+    return (await handleAuthCallback())?.type === 'oauth';
+  } catch {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    throw new Error('No se pudo verificar el regreso de Google. Intenta ingresar de nuevo.');
+  }
+}
+
 function Modal({title, close, children}) {
   const dialog = useRef(null);
   useEffect(() => { if (!dialog.current.open) dialog.current.showModal(); }, []);
@@ -29,40 +45,31 @@ function Modal({title, close, children}) {
   </dialog>;
 }
 
-function AccessForm({mode, setMode, invite, close, refresh}) {
+function GoogleAccess({close, callbackError}) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
-  const title = { login: 'Acceso al equipo', invite: 'Aceptar invitación', recovery: 'Nueva contraseña', forgot: 'Recuperar contraseña' }[mode];
-  async function submit(event) {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    setBusy(true); setError(''); setNotice('');
+  const [error, setError] = useState(callbackError);
+  async function signIn() {
+    setBusy(true); setError('');
     try {
-      if (mode === 'forgot') {
-        await requestPasswordRecovery(data.get('email'));
-        setNotice('Si existe una cuenta asociada, recibirás un correo con instrucciones.');
+      const settings = await getSettings();
+      if (!settings.providers.google) {
+        setError('Google todavía no está habilitado en la configuración de Identity de este sitio.');
+        setBusy(false);
         return;
       }
-      if (mode === 'invite') await acceptInvite(invite, data.get('password'));
-      else if (mode === 'recovery') await updateUser({ password: data.get('password') });
-      else await login(data.get('email'), data.get('password'));
-      await refresh(true);
-      close();
+      oauthLogin('google');
     } catch (failure) {
-      setError(failure.status === 401 ? 'El correo o la contraseña no son válidos.' : failure.status === 403 ? 'La cuenta aún no tiene acceso al equipo.' : 'No se pudo completar el acceso. Verifica los datos o solicita ayuda al administrador.');
-    } finally { setBusy(false); }
+      if (failure.message === 'Redirecting to OAuth provider') return;
+      setError('No se pudo conectar con el servicio de acceso. Intenta nuevamente.');
+      setBusy(false);
+    }
   }
-  return <Modal title={title} close={close}>
-    <p className="muted">{mode === 'login' ? 'Ingresa con la cuenta que recibió la invitación de CEXTAC Business Group.' : 'Gestiona el acceso a tu cuenta interna de CEXTAC.'}</p>
-    <form className="stack" onSubmit={submit} key={mode}>
-      {['login', 'forgot'].includes(mode) && <label>Correo corporativo<input name="email" type="email" placeholder="nombre@empresa.com" autoComplete="email" required/></label>}
-      {mode !== 'forgot' && <label>{mode === 'login' ? 'Contraseña' : 'Elige una contraseña'}<input name="password" type="password" minLength={mode === 'login' ? undefined : 8} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required/></label>}
+  return <Modal title="Acceso al espacio de trabajo" close={close}>
+    <p className="muted">Selecciona la cuenta de Google asociada a <strong>{workspaceEmail}</strong>. No necesitas una contraseña de LexAduana ni una nueva invitación.</p>
+    <div className="stack">
       {error && <p className="alert" role="alert">{error}</p>}
-      {notice && <p className="notice" role="status">{notice}</p>}
-      <button className="button primary" disabled={busy}>{busy ? 'Verificando…' : mode === 'forgot' ? 'Enviar enlace' : mode === 'login' ? 'Ingresar' : 'Guardar contraseña'} <ArrowRight size={17}/></button>
-      {['login', 'forgot'].includes(mode) && <button type="button" className="text-button" onClick={() => { setError(''); setNotice(''); setMode(mode === 'login' ? 'forgot' : 'login'); }}>{mode === 'login' ? 'Olvidé mi contraseña' : 'Volver al inicio de sesión'}</button>}
-    </form>
+      <button type="button" className="button primary" onClick={signIn} disabled={busy}>{busy ? 'Conectando con Google…' : 'Continuar con Google'} <ArrowRight size={17}/></button>
+    </div>
   </Modal>;
 }
 
@@ -103,8 +110,7 @@ function Status({item}) {
 export default function App() {
   const [page, setPage] = useState('Resumen');
   const [modal, setModal] = useState('');
-  const [authMode, setAuthMode] = useState('login');
-  const [invite, setInvite] = useState('');
+  const [authError, setAuthError] = useState('');
   const [session, setSession] = useState(null);
   const [sessionReady, setSessionReady] = useState(false);
   const [search, setSearch] = useState('');
@@ -117,24 +123,20 @@ export default function App() {
   const [opening, setOpening] = useState('');
   const [reload, setReload] = useState(0);
 
-  async function refreshAuth(surface = false) {
-    try {
-      const user = await getUser();
-      setSession(user ? await api('/api/session') : null);
-    } catch (failure) {
-      setSession(null);
-      if (surface) throw failure;
-    } finally { setSessionReady(true); }
-  }
-
   useEffect(() => {
     let active = true;
-    initialAuth ??= handleAuthCallback();
-    initialAuth.then((result) => {
+    initialAuth ??= completeGoogleSignIn();
+    initialAuth.then(async (returnedFromGoogle) => {
+      const user = await getUser();
+      if (!user && !returnedFromGoogle) return;
+      const session = await api('/api/session');
+      if (active) setSession(session);
+    }).catch((failure) => {
       if (!active) return;
-      if (result?.type === 'invite' || result?.type === 'recovery') { setInvite(result.token ?? ''); setAuthMode(result.type); setModal('access'); }
-    }).catch(() => { if (active) { setOpenError('El enlace de acceso no es válido o caducó.'); setModal('access'); } })
-      .finally(() => { if (active) refreshAuth(); });
+      setSession(null);
+      setAuthError(failure.status === 403 ? 'Esta cuenta no tiene acceso. Selecciona el correo autorizado en Google.' : failure.message);
+      setModal('access');
+    }).finally(() => { if (active) setSessionReady(true); });
     const unsubscribe = onAuthChange((event) => {
       if (event === 'logout' || event === 'LOGOUT') { setSession(null); setSelected(null); setList(null); }
     });
@@ -156,7 +158,7 @@ export default function App() {
     return () => { clearTimeout(timer); controller.abort(); };
   }, [email, search, offset, reload]);
 
-  function access() { setAuthMode('login'); setModal('access'); }
+  function access() { setAuthError(''); setModal('access'); }
   function create() { if (session) setModal('new'); else access(); }
   function navigate(label) {
     if (label === 'Fuentes normativas') { setModal('sources'); return; }
@@ -219,7 +221,7 @@ export default function App() {
         </>}
       </div>
     </main>
-    {modal === 'access' && <AccessForm mode={authMode} setMode={setAuthMode} invite={invite} close={() => { setModal(''); setInvite(''); }} refresh={refreshAuth}/>}
+    {modal === 'access' && <GoogleAccess close={() => setModal('')} callbackError={authError}/>}
     {modal === 'new' && session && <Intake close={() => setModal('')} created={(entry) => { setModal(''); setPage('Expedientes'); updated(entry); }} clients={[...new Set(list?.items.map(({client}) => client))]}/>}
     {modal === 'sources' && <Modal title="Fuentes normativas" close={() => setModal('')}><p className="muted">El análisis consulta el Normograma DIAN. Contrasta las citas y la vigencia aplicable al caso antes de firmar.</p><div className="source-list">{references.map(([title, summary, url]) => <a key={url} href={url} target="_blank" rel="noreferrer"><BookOpen size={19}/><span><strong>{title}</strong><small>{summary}</small></span><ArrowUpRight size={17}/></a>)}</div></Modal>}
     {modal === 'help' && <Modal title="Guía de uso" close={() => setModal('')}><ol className="guide"><li><UploadCloud size={18}/><span><strong>Registra el expediente.</strong> Identifica al cliente y carga primero el acto principal.</span></li><li><Scale size={18}/><span><strong>Revisa el dictamen.</strong> Comprueba hechos, fuentes y fechas de cómputo.</span></li><li><ArrowDownToLine size={18}/><span><strong>Exporta la respuesta.</strong> Aprueba y descarga el Word para firmar y enviar externamente.</span></li><li><FileCheck2 size={18}/><span><strong>Deja constancia.</strong> Registra la respuesta, el radicado y la resolución del caso.</span></li></ol></Modal>}

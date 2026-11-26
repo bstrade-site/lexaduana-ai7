@@ -4,6 +4,7 @@ import { getStore } from '@netlify/blobs';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { cases } from '../../db/schema.js';
+import { canAccessWorkspace, workspaceEmail } from './access.mjs';
 import { analyze } from './analysis.mjs';
 import { makeLetter } from './letter.mjs';
 import { clientName, deadlines, defaultRecord, recordUpdate } from './rules.mjs';
@@ -36,10 +37,9 @@ async function authenticate(req: Request) {
   }).catch(() => null);
   if (!response || response.status >= 500) throw new ApiError(503, 'La verificación de identidad no está disponible.');
   if (!response.ok) throw new ApiError(401, 'Tu sesión no es válida o ha caducado.');
-  const user = await response.json();
-  const roleSets = [user.app_metadata?.roles, user.app_metadata?.authorization?.roles];
-  if (typeof user.id !== 'string' || !roleSets.some((roles) => Array.isArray(roles) && roles.includes('equipo'))) throw new ApiError(403, 'Tu cuenta no tiene acceso al espacio interno de CEXTAC.');
-  return { id: user.id, email: user.email };
+  const user = await response.json().catch(() => null);
+  if (!canAccessWorkspace(user)) throw new ApiError(403, 'Esta cuenta no tiene acceso al espacio interno de CEXTAC.');
+  return { id: user.id, email: workspaceEmail };
 }
 
 async function bounded(req: Request, limit: number) {

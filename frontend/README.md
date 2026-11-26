@@ -2,9 +2,11 @@
 
 Espacio interno de gestión aduanera. Los expedientes y sus revisiones se guardan en Netlify Database; los PDF originales se guardan de forma privada en Netlify Blobs. Netlify aplica la migración durante el despliegue.
 
-## Acceso del equipo
+## Acceso al espacio de trabajo
 
-En Netlify Identity, limita el registro a invitaciones e invita a los integrantes autorizados. Asigna a cada cuenta el rol `equipo` en sus metadatos de aplicación. Sin ese rol, la API rechaza las solicitudes aunque la cuenta tenga una sesión válida. El equipo autorizado comparte todos los expedientes; no hay cuentas de cliente ni rutas públicas a sus documentos. La API valida la sesión contra la instancia de Identity de `lexaduana-ai.netlify.app`.
+En el panel de Netlify, habilita **Google** en **Identity → Registration → External providers → Add provider**. Mantén el registro por invitación; `bs.trade@cextacbusinessgroup.com` ya tiene una cuenta confirmada y no necesita una nueva invitación. Después del despliegue, selecciona **Acceso al equipo → Continuar con Google** en el sitio de producción y elige la cuenta de Google con ese correo exacto.
+
+La API valida la sesión contra la instancia de Identity de `lexaduana-ai.netlify.app` y solo autoriza ese correo confirmado. No depende del rol `equipo`. No hay rutas públicas a los expedientes. El cambio retira el formulario de contraseña de LexAduana, pero no modifica las credenciales ni revoca las sesiones ya emitidas por Identity para la cuenta autorizada.
 
 ## API
 
