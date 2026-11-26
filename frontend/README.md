@@ -1,26 +1,23 @@
 # LexAduana · CEXTAC Business Group
 
-Espacio interno de gestión aduanera. Los expedientes y sus revisiones se guardan en Netlify Database; los PDF originales se guardan de forma privada en Netlify Blobs. Netlify aplica la migración durante el despliegue.
+Espacio público de gestión aduanera. Los expedientes y sus revisiones se guardan en Netlify Database; los PDF originales se guardan en Netlify Blobs. Netlify aplica la migración durante el despliegue.
 
 ## Acceso al espacio de trabajo
 
-En el panel de Netlify, habilita **Google** en **Identity → Registration → External providers → Add provider**. Mantén el registro por invitación; `bs.trade@cextacbusinessgroup.com` ya tiene una cuenta confirmada y no necesita una nueva invitación. Después del despliegue, selecciona **Acceso al equipo → Continuar con Google** en el sitio de producción y elige la cuenta de Google con ese correo exacto.
-
-La API valida la sesión contra la instancia de Identity de `lexaduana-ai.netlify.app` y solo autoriza ese correo confirmado. No depende del rol `equipo`. No hay rutas públicas a los expedientes. El cambio retira el formulario de contraseña de LexAduana, pero no modifica las credenciales ni revoca las sesiones ya emitidas por Identity para la cuenta autorizada.
+El panel abre sin contraseña, cuenta ni inicio de sesión. Cualquier visitante puede consultar y editar expedientes existentes, crear otros, descargar los PDF y ejecutar análisis. Las modificaciones se registran como anónimas. No uses este espacio para documentos confidenciales ni datos personales que no deban hacerse públicos.
 
 ## API
 
-Todas las rutas requieren la sesión del navegador o un encabezado `Authorization: Bearer <JWT de Identity>` de una cuenta autorizada. Las solicitudes de escritura que usan cookies requieren el mismo origen. Los errores HTTP se devuelven como JSON con un campo `error`.
+Las rutas de expedientes no requieren cookies ni encabezados de autenticación. Las solicitudes de escritura con encabezado `Origin` deben venir del mismo origen que la API; los clientes HTTP sin ese encabezado pueden usarla directamente. Los errores HTTP se devuelven como JSON con un campo `error`.
 
 | Método y ruta | Uso |
 | --- | --- |
-| `GET /api/session` | Verifica el acceso de la cuenta. |
 | `GET /api/cases?search=&offset=0` | Lista hasta 50 expedientes, con búsqueda por cliente o número de acto y totales de la cartera. |
 | `POST /api/cases` | Recibe un formulario `multipart/form-data` con `client` y uno a cuatro campos `pdf` (primero el acto principal, hasta 8 MB en total). Devuelve `201` con el expediente archivado. |
 | `GET /api/cases/:id` | Devuelve la ficha, el análisis disponible, la versión y los vencimientos calculados. |
 | `POST /api/cases/:id/analysis` | Recibe `{"confirmProcessing":true}`. Genera el análisis con los PDF archivados y devuelve JSON por líneas: eventos `progress`, líneas vacías `{}` de mantenimiento y un evento final `result` o `error`. Un HTTP `200` no sustituye la comprobación de ese evento final. |
 | `PATCH /api/cases/:id` | Guarda `client`, `record` completo y `version` obtenida con `GET`. Si otra persona guardó primero, responde `409`. |
-| `GET /api/cases/:id/pdf/:index` | Descarga el PDF privado según su índice desde cero. |
+| `GET /api/cases/:id/pdf/:index` | Descarga el PDF según su índice desde cero. |
 | `GET /api/cases/:id/word` | Descarga un `.docx` cuando el escrito completo tiene una aprobación guardada. |
 
 ## Revisión antes del envío

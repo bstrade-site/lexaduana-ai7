@@ -14,7 +14,6 @@
     "@google/genai": "^3.6.1",
     "@netlify/blobs": "^11.1.11",
     "@netlify/database": "^2.0.4",
-    "@netlify/identity": "^2.0.1",
     "@netlify/server": "^0.1.6",
     "cheerio": "^1.2.0",
     "docx": "^9.16.0",

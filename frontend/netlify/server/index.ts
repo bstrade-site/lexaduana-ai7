@@ -4,7 +4,6 @@ import { getStore } from '@netlify/blobs';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { db } from '../../db/index.js';
 import { cases } from '../../db/schema.js';
-import { canAccessWorkspace, workspaceEmail } from './access.mjs';
 import { analyze } from './analysis.mjs';
 import { makeLetter } from './letter.mjs';
 import { clientName, deadlines, defaultRecord, recordUpdate } from './rules.mjs';
@@ -12,8 +11,8 @@ import { clientName, deadlines, defaultRecord, recordUpdate } from './rules.mjs'
 export const config: Config = { path: '/api/*' };
 
 const pdfLimit = 8 * 1024 * 1024;
-const identityEndpoint = 'https://lexaduana-ai.netlify.app/.netlify/identity/user';
-const headers = { 'Cache-Control': 'no-store, private', 'X-Content-Type-Options': 'nosniff' };
+const anonymousActor = 'anonymous';
+const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
 const pdfStore = () => getStore({ name: 'customs-case-documents', consistency: 'strong' });
 const clientKey = (value: string) => value.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/\s+/g, ' ');
 const uuid = /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i;
@@ -24,22 +23,6 @@ class ApiError extends Error {
 
 function json(data: unknown, status = 200) {
   return Response.json(data, { status, headers });
-}
-
-async function authenticate(req: Request) {
-  const bearer = req.headers.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1];
-  const cookie = req.headers.get('cookie')?.match(/(?:^|;\s*)nf_jwt=([\w.\-]+)/)?.[1];
-  const token = bearer ?? cookie;
-  if (!token || token.length > 8000) throw new ApiError(401, 'Inicia sesión para acceder a los expedientes.');
-  if (!bearer && !['GET', 'HEAD'].includes(req.method) && req.headers.get('origin') !== new URL(req.url).origin) throw new ApiError(403, 'Origen de la solicitud no autorizado.');
-  const response = await fetch(identityEndpoint, {
-    headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5500), redirect: 'error',
-  }).catch(() => null);
-  if (!response || response.status >= 500) throw new ApiError(503, 'La verificación de identidad no está disponible.');
-  if (!response.ok) throw new ApiError(401, 'Tu sesión no es válida o ha caducado.');
-  const user = await response.json().catch(() => null);
-  if (!canAccessWorkspace(user)) throw new ApiError(403, 'Esta cuenta no tiene acceso al espacio interno de CEXTAC.');
-  return { id: user.id, email: workspaceEmail };
 }
 
 async function bounded(req: Request, limit: number) {
@@ -82,7 +65,7 @@ async function listCases(url: URL) {
   return json({ items: rows.slice(0, 50), more: rows.length > 50, totals });
 }
 
-async function createCase(req: Request, user: {id: string}) {
+async function createCase(req: Request) {
   const data = await bounded(req, pdfLimit + 32768);
   const form = await new Response(data, { headers: { 'Content-Type': req.headers.get('content-type') ?? '' } }).formData().catch(() => null);
   const client = clientName.safeParse(form?.get('client'));
@@ -102,7 +85,7 @@ async function createCase(req: Request, user: {id: string}) {
       await store.set(key, await file.arrayBuffer());
       stored.push({ key, name: file.name.slice(0, 180).replace(/[\u0000-\u001f\u007f]/g, '') });
     }
-    const [created] = await db.insert(cases).values({ id, client: client.data, clientKey: clientKey(client.data), files: stored, record: defaultRecord, updatedBy: user.id }).returning();
+    const [created] = await db.insert(cases).values({ id, client: client.data, clientKey: clientKey(client.data), files: stored, record: defaultRecord, updatedBy: anonymousActor }).returning();
     return json(detail(created), 201);
   } catch (error) {
     await Promise.allSettled(stored.map(({key}) => store.delete(key)));
@@ -110,7 +93,7 @@ async function createCase(req: Request, user: {id: string}) {
   }
 }
 
-function analysisStream(row: typeof cases.$inferSelect, user: {id: string}) {
+function analysisStream(row: typeof cases.$inferSelect) {
   const encoder = new TextEncoder();
   let active = true;
   return new Response(new ReadableStream({
@@ -126,7 +109,7 @@ function analysisStream(row: typeof cases.$inferSelect, user: {id: string}) {
           return { name, bytes };
         }));
         const analysis = await analyze(files, (progress) => send({ progress }));
-        const [updated] = await db.update(cases).set({ analysis, version: row.version + 1, updatedAt: new Date(), updatedBy: user.id })
+        const [updated] = await db.update(cases).set({ analysis, version: row.version + 1, updatedAt: new Date(), updatedBy: anonymousActor })
           .where(and(eq(cases.id, row.id), eq(cases.version, row.version))).returning();
         if (!updated) send({ error: 'El expediente cambió durante el análisis. Ábrelo de nuevo antes de reintentar.' });
         else send({ result: detail(updated) });
@@ -149,11 +132,13 @@ export default async function handler(req: Request) {
     const url = new URL(req.url);
     const [, api, resource, id, action, fileIndex, ...rest] = url.pathname.split('/');
     if (api !== 'api' || rest.length) return json({ error: 'Ruta no encontrada.' }, 404);
-    const user = await authenticate(req);
-    if (resource === 'session' && !id && req.method === 'GET') return json({ email: user.email });
     if (resource !== 'cases') return json({ error: 'Ruta no encontrada.' }, 404);
+    const origin = req.headers.get('origin');
+    if (['POST', 'PATCH'].includes(req.method) && origin !== null && origin !== url.origin) {
+      throw new ApiError(403, 'Origen de la solicitud no autorizado.');
+    }
     if (!id && req.method === 'GET') return await listCases(url);
-    if (!id && req.method === 'POST') return await createCase(req, user);
+    if (!id && req.method === 'POST') return await createCase(req);
     if (!id || !uuid.test(id)) return json({ error: 'Expediente no encontrado.' }, 404);
     const [row] = await db.select().from(cases).where(eq(cases.id, id)).limit(1);
     if (!row) return json({ error: 'Expediente no encontrado.' }, 404);
@@ -165,7 +150,7 @@ export default async function handler(req: Request) {
       const input = recordUpdate.safeParse(data);
       if (!input.success) throw new ApiError(400, input.error.issues[0]?.message ?? 'Revisa los datos del expediente.');
       const { client, record, version } = input.data;
-      const [updated] = await db.update(cases).set({ client, clientKey: clientKey(client), record, version: version + 1, updatedAt: new Date(), updatedBy: user.id })
+      const [updated] = await db.update(cases).set({ client, clientKey: clientKey(client), record, version: version + 1, updatedAt: new Date(), updatedBy: anonymousActor })
         .where(and(eq(cases.id, id), eq(cases.version, version))).returning();
       if (!updated) throw new ApiError(409, 'Otra persona modificó el expediente. Vuelve a abrirlo para continuar.');
       return json(detail(updated));
@@ -175,7 +160,7 @@ export default async function handler(req: Request) {
       let consent;
       try { consent = JSON.parse(data.toString('utf8'))?.confirmProcessing; } catch { throw new ApiError(400, 'JSON no válido.'); }
       if (consent !== true) throw new ApiError(400, 'Confirma el procesamiento de los PDF por IA.');
-      return analysisStream(row, user);
+      return analysisStream(row);
     }
     if (action === 'pdf' && fileIndex && /^\d$/.test(fileIndex) && req.method === 'GET') {
       const file = row.files[Number(fileIndex)];

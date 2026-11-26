@@ -6,16 +6,16 @@ const tabs = [[Files, 'Ficha del expediente'], [Scale, 'Dictamen'], [FileCheck2,
 const letterFields = new Set(['act', 'office', 'subject', 'signer', 'capacity', 'contact', 'body', 'attachments']);
 
 export async function api(path, options = {}) {
-  const response = await fetch(path, { ...options, credentials: 'same-origin' });
+  const response = await fetch(path, { ...options, credentials: 'omit' });
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    throw Object.assign(new Error(payload?.error || 'No fue posible completar la solicitud.'), { status: response.status });
+    throw new Error(payload?.error || 'No fue posible completar la solicitud.');
   }
   return response.json();
 }
 
 async function readAnalysis(id, update) {
-  const response = await fetch(`/api/cases/${id}/analysis`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmProcessing: true }) });
+  const response = await fetch(`/api/cases/${id}/analysis`, { method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirmProcessing: true }) });
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
     throw new Error(payload?.error || 'No se pudo iniciar el análisis.');
